@@ -1,0 +1,1 @@
+/Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/target/debug/pilatus4_explorer: /Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/src/io.rs /Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/src/lib.rs /Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/src/main.rs

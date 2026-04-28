@@ -1,0 +1,50 @@
+[package]
+name = "pilatus4_explorer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ndarray = "0.15"
+tiff = "0.9"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+num-complex = "0.4"
+regex = "1.10"
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "CanvasRenderingContext2d"] }
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+base64 = "0.21"
+
+[dev-dependencies]
+approx = "0.5"
+
+[lib]
+name = "pilatus4_explorer"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "pilatus4_explorer"
+path = "src/main.rs"
+
+[[bin]]
+name = "cli"
+path = "src/bin/cli.rs"
+
+[profile.dev]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = true
+
+[profile.release.package."*"]
+opt-level = 2
+
+[profile.wasm]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+opt-level = "z"

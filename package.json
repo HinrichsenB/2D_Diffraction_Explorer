@@ -1,0 +1,29 @@
+{
+  "name": "pilatus4-explorer-web",
+  "version": "0.1.0",
+  "description": "PILATUS4 Data Explorer - Real-time X-ray diffraction data processing in the browser",
+  "main": "index.html",
+  "scripts": {
+    "build": "wasm-pack build --target web --release",
+    "dev": "wasm-pack build --target web --dev && npx http-server -p 8080 -c-1",
+    "serve": "npx http-server -p 8080 -c-1",
+    "test": "wasm-pack test --headless --firefox",
+    "clean": "rm -rf pkg"
+  },
+  "keywords": [
+    "pilatus4",
+    "x-ray",
+    "diffraction",
+    "wasm",
+    "rust"
+  ],
+  "author": "Bernd Hinrichsen <Bernd.Hinrichsen@momentum-transfer.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "wasm-pack": "^0.14.0",
+    "http-server": "^14.1.1"
+  },
+  "dependencies": {
+    "pilatus4_explorer": "file:./pkg"
+  }
+}

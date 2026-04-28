@@ -1,0 +1,1 @@
+/Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/target/release/libpilatus4_explorer.rlib: /Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/src/io.rs /Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/src/lib.rs /Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/src/processing.rs
