@@ -1,0 +1,40 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+    
+    - name: Install wasm-pack
+      run: curl https://rustwasm.org/wasm-pack/installer/init.sh -sSf | sh
+    
+    - name: Build WASM
+      run: wasm-pack build --target web --release
+    
+    - name: Setup deployment directory
+      run: |
+        mkdir -p deploy
+        cp index.html deploy/
+        cp app.js deploy/
+        cp -r pkg deploy/
+        cp README.md deploy/
+    
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./deploy
+        cname: false
