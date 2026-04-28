@@ -23,12 +23,26 @@ const appState = {
  */
 async function init() {
     console.log('Initializing PILATUS4 Data Explorer...');
+    console.log('Current location:', window.location.href);
 
-    // Import WASM module
+    // Import WASM module - try absolute path first
+    let wasm = null;
     try {
-        const wasm = await import('./pkg/pilatus4_explorer.js');
-        console.log('✓ WASM module loaded');
+        wasm = await import('/2D_Diffraction_Explorer/pkg/pilatus4_explorer.js');
+        console.log('✓ WASM module loaded (absolute path)');
+    } catch (error1) {
+        console.warn('Absolute path failed, trying relative path:', error1.message);
+        try {
+            wasm = await import('./pkg/pilatus4_explorer.js');
+            console.log('✓ WASM module loaded (relative path)');
+        } catch (error2) {
+            showMessage(`Failed to load WASM module: ${error2.message}`, 'error');
+            console.error('WASM import failed (both paths):', error1, error2);
+            return;
+        }
+    }
 
+    try {
         // Create DataExplorer instance
         appState.explorer = new wasm.DataExplorer();
         console.log('✓ DataExplorer instance created');
@@ -39,8 +53,9 @@ async function init() {
         setupRangeSliders();
 
         updateStatus();
+        console.log('✓ UI initialized successfully');
     } catch (error) {
-        showMessage(`Failed to initialize: ${error.message}`, 'error');
+        showMessage(`Failed to initialize UI: ${error.message}`, 'error');
         console.error('Initialization error:', error);
     }
 }
