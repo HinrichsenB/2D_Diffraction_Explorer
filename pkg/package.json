@@ -1,0 +1,15 @@
+{
+  "name": "pilatus4_explorer",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "pilatus4_explorer_bg.wasm",
+    "pilatus4_explorer.js",
+    "pilatus4_explorer.d.ts"
+  ],
+  "main": "pilatus4_explorer.js",
+  "types": "pilatus4_explorer.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
