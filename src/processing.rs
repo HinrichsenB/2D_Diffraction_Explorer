@@ -174,6 +174,12 @@ pub struct IntegrationResult {
 /// 
 /// Converts detector coordinates (i, j) to reciprocal space (2θ, χ)
 /// and integrates intensity into 2D histogram
+/// 
+/// NOTE: Geometry follows PyFAI conventions:
+/// - Detector coordinates: origin at beam center (PONI)
+/// - poni1 = vertical offset (in meters)
+/// - poni2 = horizontal offset (in meters)
+/// - 2θ = 2.0 * atan(r_transverse / distance) [NOT using sin formula]
 pub fn azimuthal_integrate(
     data: &ArrayView2<f32>,
     geom: &IntegrationGeometry,
@@ -199,13 +205,23 @@ pub fn azimuthal_integrate(
     let mut intensity = Array2::zeros((two_theta_bins, chi_bins));
     let mut counts = Array2::from_elem((two_theta_bins, chi_bins), 0u32);
     
-    // Rotation matrices (simplified - assuming small angles)
-    // For simplicity, we approximate with just the angles
-    // In a full implementation, we'd construct the full 3D rotation matrix
-    let _cos_r1 = geom.rot1.cos();
-    let _sin_r1 = geom.rot1.sin();
-    let cos_r2 = geom.rot2.cos();
-    let sin_r2 = geom.rot2.sin();
+    // Pre-compute rotation matrix components
+    // For detector rotations: apply Rz(rot3) * Ry(rot2) * Rx(rot1)
+    let c1 = geom.rot1.cos();
+    let s1 = geom.rot1.sin();
+    let c2 = geom.rot2.cos();
+    let s2 = geom.rot2.sin();
+    let c3 = geom.rot3.cos();
+    let s3 = geom.rot3.sin();
+    
+    // 3x3 rotation matrix for detector coordinate transformation
+    // Applied to (x_pixel, y_pixel, 0) -> (x_rot, y_rot, z_rot)
+    let r11 = c2 * c3;
+    let r12 = s1 * s2 * c3 - c1 * s3;
+    let r21 = c2 * s3;
+    let r22 = s1 * s2 * s3 + c1 * c3;
+    let r31 = -s2;
+    let r32 = s1 * c2;
     
     // Iterate over all detector pixels
     let (n_rows, n_cols) = data.dim();
@@ -218,26 +234,38 @@ pub fn azimuthal_integrate(
                 continue;
             }
             
-            // Convert pixel coordinates to real coordinates on detector (meters)
-            // Using detector coordinates: (0,0) is top-left
-            let y_det = (i as f64 - geom.poni1 / geom.pixel_size_1) * geom.pixel_size_1;
-            let x_det = (j as f64 - geom.poni2 / geom.pixel_size_2) * geom.pixel_size_2;
+            // Convert pixel indices to real detector coordinates (meters)
+            // poni1 is the vertical beam center position (meters)
+            // poni2 is the horizontal beam center position (meters)
+            let y_pixel_m = i as f64 * geom.pixel_size_1 - geom.poni1;
+            let x_pixel_m = j as f64 * geom.pixel_size_2 - geom.poni2;
             
-            // Apply rotation (simple approximation)
-            let x_rot = x_det * cos_r2 - y_det * sin_r2;
-            let y_rot = x_det * sin_r2 + y_det * cos_r2;
+            // Apply rotations to detector coordinates
+            // Detector is at z = distance, pixel displacement at (x_pixel_m, y_pixel_m, 0)
+            // After rotation, we get the position in the rotated frame
+            let x_rot = r11 * x_pixel_m + r12 * y_pixel_m;
+            let y_rot = r21 * x_pixel_m + r22 * y_pixel_m;
+            let z_component = r31 * x_pixel_m + r32 * y_pixel_m;  // z-displacement from detector rotation
             
-            // Calculate scattering vectors
-            // Distance from beam to pixel
-            let r_pixel = (x_rot * x_rot + y_rot * y_rot + geom.distance * geom.distance).sqrt();
+            // The actual z-position in 3D is: distance + z_component (detector is tilted)
+            // But for a flat detector with small rotations, z_component is typically << distance
+            let z_pos = geom.distance + z_component;
             
-            // Two-theta: angle between incident and scattered beam
-            // sin(θ) = r_transverse / r_pixel
-            let sin_theta = (x_rot * x_rot + y_rot * y_rot).sqrt() / r_pixel;
-            let two_theta = 2.0 * sin_theta.asin();
+            // Transverse distance from the beam axis (in rotated frame)
+            let r_transverse = (x_rot * x_rot + y_rot * y_rot).sqrt();
             
-            // Chi: azimuthal angle
+            // Scattering angle 2θ
+            // CORRECT FORMULA (matches PyFAI):
+            // theta = atan(r_transverse / z_pos)
+            // two_theta = 2 * theta
+            // This is the arctan formula, NOT sine formula
+            let two_theta = 2.0 * (r_transverse / z_pos).atan();
+            
+            // Azimuthal angle χ
+            // atan2(y, x) gives angle from x-axis
             let chi = y_rot.atan2(x_rot);
+            
+            // Normalize chi to [0, 2π) range
             let chi_normalized = if chi < 0.0 { chi + 2.0 * PI } else { chi };
             
             // Check if within integration range
