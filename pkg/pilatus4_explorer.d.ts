@@ -48,12 +48,12 @@ export interface InitOutput {
     readonly __wbg_dataexplorer_free: (a: number, b: number) => void;
     readonly dataexplorer_detector_info: (a: number) => [number, number];
     readonly dataexplorer_load_bright_field: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly dataexplorer_load_image: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly dataexplorer_load_mask: (a: number, b: number, c: number) => [number, number, number, number];
     readonly dataexplorer_load_poni: (a: number, b: number, c: number) => [number, number, number, number];
     readonly dataexplorer_new: () => number;
     readonly dataexplorer_process: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly dataexplorer_status: (a: number) => [number, number];
-    readonly dataexplorer_load_image: (a: number, b: number, c: number) => [number, number, number, number];
-    readonly dataexplorer_load_mask: (a: number, b: number, c: number) => [number, number, number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

@@ -457,6 +457,247 @@ pub fn load_tiff<P: AsRef<Path>>(path: P) -> LoadResult<Array2<u32>> {
     Ok(array)
 }
 
+
+
+/// Load bright field from bytes (e.g., from WASM base64 decoding)
+pub fn load_bright_field_from_bytes(bytes: &[u8]) -> LoadResult<Array2<f32>> {
+    use std::io::Cursor;
+    
+    let mut reader = Cursor::new(bytes);
+    
+    // Read NPY header
+    let mut magic = [0u8; 6];
+    reader.read_exact(&mut magic).map_err(|e| LoadError::NumpyError(format!("Read error: {}", e)))?;
+    
+    if &magic != b"\x93NUMPY" {
+        return Err(LoadError::NumpyError("Invalid NPY magic number".to_string()));
+    }
+    
+    // Read version
+    let mut version = [0u8; 2];
+    reader.read_exact(&mut version).map_err(|e| LoadError::NumpyError(format!("Read error: {}", e)))?;
+    
+    // Read header length
+    let mut header_len_bytes = [0u8; 2];
+    reader.read_exact(&mut header_len_bytes).map_err(|e| LoadError::NumpyError(format!("Read error: {}", e)))?;
+    let header_len = u16::from_le_bytes(header_len_bytes) as usize;
+    
+    // Read header
+    let mut header_buf = vec![0u8; header_len];
+    reader.read_exact(&mut header_buf).map_err(|e| LoadError::NumpyError(format!("Read error: {}", e)))?;
+    let header = String::from_utf8_lossy(&header_buf);
+    
+    // Parse shape from header
+    let shape_start = header.find("'shape': (").ok_or_else(|| LoadError::NumpyError("Missing shape in NPY header".to_string()))?;
+    let shape_end = header[shape_start..].find(')').ok_or_else(|| LoadError::NumpyError("Invalid shape format".to_string()))?;
+    let shape_str = &header[shape_start + 10..shape_start + shape_end];
+    
+    let dims: Vec<&str> = shape_str.split(',').map(|s| s.trim()).collect();
+    if dims.len() != 2 {
+        return Err(LoadError::NumpyError(format!("Expected 2D array, got {}D", dims.len())));
+    }
+    
+    let dim1: usize = dims[0].parse().map_err(|_| LoadError::NumpyError("Invalid dimension 1".to_string()))?;
+    let dim2: usize = dims[1].parse().map_err(|_| LoadError::NumpyError("Invalid dimension 2".to_string()))?;
+    
+    // Read data
+    let mut data: Vec<f32> = vec![0.0; dim1 * dim2];
+    for elem in &mut data {
+        let mut bytes_elem = [0u8; 4];
+        reader.read_exact(&mut bytes_elem).map_err(|e| LoadError::NumpyError(format!("Read error: {}", e)))?;
+        *elem = f32::from_le_bytes(bytes_elem);
+    }
+    
+    Array2::from_shape_vec((dim1, dim2), data)
+        .map_err(|_| LoadError::NumpyError("Failed to reshape array".to_string()))
+}
+
+/// Load mask from bytes (e.g., from WASM base64 decoding)
+pub fn load_mask_from_bytes(bytes: &[u8]) -> LoadResult<Array2<bool>> {
+    // Parse as EDF format
+    parse_edf_data(bytes)
+}
+
+/// Load TIFF from bytes (e.g., from WASM base64 decoding)
+pub fn load_tiff_from_bytes(bytes: &[u8]) -> LoadResult<Array2<u32>> {
+    use std::io::Cursor;
+    
+    let cursor = Cursor::new(bytes);
+    let mut decoder = tiff::decoder::Decoder::new(cursor)
+        .map_err(|e| LoadError::TiffError(format!("TIFF decode error: {}", e)))?;
+    
+    // Read image data
+    let tiff_data = decoder.read_image()
+        .map_err(|e| LoadError::TiffError(format!("Cannot decode image: {}", e)))?;
+    
+    // Get dimensions
+    let (width, height) = decoder.dimensions()
+        .map_err(|e| LoadError::TiffError(format!("Cannot get dimensions: {}", e)))?;
+    
+    // Convert to u32 array
+    let data: Vec<u32> = match tiff_data {
+        tiff::decoder::DecodingResult::U8(v) => {
+            v.into_iter().map(|x| x as u32).collect()
+        }
+        tiff::decoder::DecodingResult::U16(v) => {
+            v.into_iter().map(|x| x as u32).collect()
+        }
+        tiff::decoder::DecodingResult::U32(v) => v,
+        tiff::decoder::DecodingResult::U64(v) => {
+            v.into_iter().map(|x| x as u32).collect()
+        }
+        tiff::decoder::DecodingResult::F32(v) => {
+            v.into_iter().map(|x| x as u32).collect()
+        }
+        tiff::decoder::DecodingResult::F64(v) => {
+            v.into_iter().map(|x| x as u32).collect()
+        }
+        tiff::decoder::DecodingResult::I8(v) => {
+            v.into_iter().map(|x| x as u32).collect()
+        }
+        tiff::decoder::DecodingResult::I16(v) => {
+            v.into_iter().map(|x| x as u32).collect()
+        }
+        tiff::decoder::DecodingResult::I32(v) => {
+            v.into_iter().map(|x| x as u32).collect()
+        }
+        tiff::decoder::DecodingResult::I64(v) => {
+            v.into_iter().map(|x| x as u32).collect()
+        }
+    };
+    
+    let array = Array2::from_shape_vec((height as usize, width as usize), data)
+        .map_err(|_| LoadError::TiffError(
+            format!("Cannot reshape data to {}x{}", height, width)
+        ))?;
+    
+    Ok(array)
+}
+
+/// Helper: Parse EDF binary data into boolean mask
+fn parse_edf_data(bytes: &[u8]) -> LoadResult<Array2<bool>> {
+    // Read header from first bytes (EDF headers are text-based)
+    let rough_header_size = find_edf_data_start(bytes)
+        .ok_or_else(|| LoadError::EdfError(
+            format!("Cannot find EDF header end in {} bytes", bytes.len())
+        ))?;
+    
+    // Parse the header to get exact offsets
+    let header = parse_edf_header(&bytes[..rough_header_size.min(4096)])?;
+    
+    // Get actual header size from EDF metadata (NOT from find_edf_data_start)
+    // EDF_HeaderSize tells us where binary data starts
+    let header_size: usize = header.get("EDF_HeaderSize")
+        .ok_or_else(|| LoadError::EdfError("Missing EDF_HeaderSize in header".to_string()))?
+        .trim()
+        .parse()
+        .map_err(|_| LoadError::EdfError("Invalid EDF_HeaderSize value".to_string()))?;
+    
+    let data_type = header.get("DataType")
+        .map(|s| s.as_str().trim())
+        .unwrap_or("UnsignedByte");
+    
+    // Get dimensions from header
+    let dim_1: usize = header.get("Dim_1")
+        .ok_or_else(|| LoadError::EdfError("Missing Dim_1 in header".to_string()))?
+        .trim()
+        .parse()
+        .map_err(|_| LoadError::EdfError("Invalid Dim_1 value".to_string()))?;
+    
+    let dim_2: usize = header.get("Dim_2")
+        .ok_or_else(|| LoadError::EdfError("Missing Dim_2 in header".to_string()))?
+        .trim()
+        .parse()
+        .map_err(|_| LoadError::EdfError("Invalid Dim_2 value".to_string()))?;
+    
+    // Get expected size from header
+    let size: usize = header.get("Size")
+        .ok_or_else(|| LoadError::EdfError("Missing Size field in EDF header".to_string()))?
+        .trim()
+        .parse()
+        .map_err(|_| LoadError::EdfError("Invalid Size value".to_string()))?;
+    
+    // Verify size consistency: Dim_1 * Dim_2 should equal Size
+    if dim_1 * dim_2 != size {
+        return Err(LoadError::EdfError(
+            format!("EDF dimension mismatch: Dim_1 ({}) * Dim_2 ({}) = {} != Size ({})", 
+                dim_1, dim_2, dim_1 * dim_2, size)
+        ));
+    }
+    
+    // Data starts at the offset specified by EDF_HeaderSize
+    if bytes.len() < header_size + size {
+        return Err(LoadError::EdfError(
+            format!("File too small: has {} bytes, need {} (header) + {} (data) = {} bytes",
+                bytes.len(), header_size, size, header_size + size)
+        ));
+    }
+    
+    let data_bytes = &bytes[header_size..];
+    let mut data = Vec::new();
+    
+    // Parse based on actual data type
+    match data_type {
+        "SignedByte" | "UnsignedByte" => {
+            data = data_bytes.iter()
+                .take(size)
+                .map(|&b| b != 0)
+                .collect();
+        }
+        "SignedShort" | "UnsignedShort" => {
+            for chunk in data_bytes.chunks(2).take(size) {
+                if chunk.len() == 2 {
+                    let value = u16::from_le_bytes([chunk[0], chunk[1]]);
+                    data.push(value != 0);
+                }
+            }
+        }
+        "SignedInteger" | "UnsignedInteger" | "SignedLong" | "UnsignedLong" => {
+            for chunk in data_bytes.chunks(4).take(size) {
+                if chunk.len() == 4 {
+                    let value = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                    data.push(value != 0);
+                }
+            }
+        }
+        _ => {
+            return Err(LoadError::EdfError(
+                format!("Unsupported EDF DataType: {}", data_type)
+            ));
+        }
+    }
+    
+    if data.len() != size {
+        return Err(LoadError::EdfError(
+            format!("Data size mismatch: expected {} elements, got {}", size, data.len())
+        ));
+    }
+    
+    // Reshape to (Dim_2 rows, Dim_1 columns) per EDF convention
+    let shape = (dim_2, dim_1);
+    Array2::from_shape_vec(shape, data)
+        .map_err(|_| LoadError::EdfError(
+            format!("Cannot reshape EDF data ({} elements) to shape ({}, {})", size, shape.0, shape.1)
+        ))
+}
+
+/// Find where EDF header ends and binary data begins
+fn find_edf_data_start(bytes: &[u8]) -> Option<usize> {
+    // Look for the closing brace of the header
+    for i in 0..bytes.len().saturating_sub(2) {
+        if bytes[i] == b'}' && bytes[i+1] == b'\n' {
+            return Some(i + 2);
+        }
+    }
+    // Fallback: assume 4096-byte header
+    if bytes.len() > 4096 {
+        Some(4096)
+    } else {
+        None
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -565,5 +806,42 @@ mod tests {
         // (but our test file has it, so this is just documentation)
         let _ai = parse_poni(&format!("{}/calibration.poni", TEST_DATA_DIR))
             .expect("PONI should parse correctly");
+    }
+    
+    #[test]
+    fn test_load_mask_from_bytes() {
+        // Simulate WASM path: load file as bytes (like after base64 decode)
+        let path = format!("{}/mask.edf", TEST_DATA_DIR);
+        let file_bytes = std::fs::read(&path).expect("Failed to read mask file");
+        
+        let mask = load_mask_from_bytes(&file_bytes).expect("Failed to load mask from bytes");
+        
+        assert_eq!(mask.dim(), (2180, 2073), "Mask shape mismatch when loaded from bytes");
+        let any_masked = mask.iter().any(|&x| x);
+        assert!(any_masked, "Mask appears to be all zeros");
+    }
+    
+    #[test]
+    fn test_load_different_detector_mask() {
+        // Test with real mask from Momentum Transfer project (different detector)
+        let path = "/Users/openclaw/.openclaw/workspace/projects/momentum-transfer/references/Knowledge/Data/A045_MT_B01_PowderCatalysts_20251030113116-3/setup/xrd/mask.edf";
+        
+        match std::fs::read(path) {
+            Ok(file_bytes) => {
+                let mask = load_mask_from_bytes(&file_bytes)
+                    .expect("Failed to load Momentum Transfer mask");
+                
+                // Different detector: 1679 rows x 1475 columns
+                let (rows, cols) = mask.dim();
+                println!("Loaded mask with shape: {} x {}", rows, cols);
+                assert_eq!(rows * cols, 2476525, "Mask element count mismatch");
+                
+                let any_masked = mask.iter().any(|&x| x);
+                assert!(any_masked, "Mask appears to be all zeros");
+            }
+            Err(e) => {
+                eprintln!("Skipping test_load_different_detector_mask: file not found ({})", e);
+            }
+        }
     }
 }

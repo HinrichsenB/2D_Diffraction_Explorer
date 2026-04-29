@@ -22,41 +22,63 @@ const appState = {
  * Initialize the application
  */
 async function init() {
-    console.log('Initializing PILATUS4 Data Explorer...');
+    console.log('=== Initializing PILATUS4 Data Explorer ===');
     console.log('Current location:', window.location.href);
+    console.log('Script directory:', import.meta.url);
 
-    // Import WASM module - try absolute path first
+    // Import WASM module - try relative path first (most likely)
     let wasm = null;
-    try {
-        wasm = await import('/2D_Diffraction_Explorer/pkg/pilatus4_explorer.js');
-        console.log('✓ WASM module loaded (absolute path)');
-    } catch (error1) {
-        console.warn('Absolute path failed, trying relative path:', error1.message);
+    const paths = ['./pkg/pilatus4_explorer.js', '/pkg/pilatus4_explorer.js', '/2D_Diffraction_Explorer/pkg/pilatus4_explorer.js'];
+    let lastError = null;
+
+    for (const path of paths) {
         try {
-            wasm = await import('./pkg/pilatus4_explorer.js');
-            console.log('✓ WASM module loaded (relative path)');
-        } catch (error2) {
-            showMessage(`Failed to load WASM module: ${error2.message}`, 'error');
-            console.error('WASM import failed (both paths):', error1, error2);
-            return;
+            console.log(`[init] Trying WASM path: ${path}`);
+            wasm = await import(path);
+            console.log(`✓ WASM module loaded from: ${path}`);
+            break;
+        } catch (error) {
+            console.warn(`[init] Failed to load from ${path}:`, error.message);
+            lastError = error;
         }
     }
 
+    if (!wasm) {
+        const msg = `Failed to load WASM module from any path. Last error: ${lastError?.message}`;
+        showMessage(msg, 'error');
+        console.error('[init]', msg);
+        console.error('[init] Last error:', lastError);
+        return;
+    }
+
     try {
+        // Initialize WASM module (critical step!)
+        console.log('[init] Initializing WASM module...');
+        const wasmInit = wasm.default || wasm.__wbg_init;
+        if (typeof wasmInit !== 'function') {
+            throw new Error('WASM default export is not a function. Available exports:', Object.keys(wasm));
+        }
+        await wasmInit();
+        console.log('[init] ✓ WASM module initialized');
+
         // Create DataExplorer instance
+        console.log('[init] Creating DataExplorer instance...');
         appState.explorer = new wasm.DataExplorer();
-        console.log('✓ DataExplorer instance created');
+        console.log('[init] ✓ DataExplorer instance created');
+        console.log('[init] Available methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(appState.explorer)));
 
         // Set up event listeners
+        console.log('[init] Setting up UI event listeners...');
         setupUploadZones();
         setupControls();
         setupRangeSliders();
 
         updateStatus();
-        console.log('✓ UI initialized successfully');
+        console.log('=== ✓ UI initialized successfully ===');
     } catch (error) {
         showMessage(`Failed to initialize UI: ${error.message}`, 'error');
-        console.error('Initialization error:', error);
+        console.error('[init] Initialization error:', error);
+        console.error('[init] Error stack:', error.stack);
     }
 }
 
@@ -65,18 +87,30 @@ async function init() {
  */
 function setupUploadZones() {
     const zones = document.querySelectorAll('.upload-zone');
+    console.log(`[setupUploadZones] Found ${zones.length} upload zones`);
 
-    zones.forEach(zone => {
+    zones.forEach((zone, idx) => {
         const fileType = zone.dataset.fileType;
         const input = zone.querySelector('input');
+        
+        console.log(`[setupUploadZones] Setting up zone ${idx}: ${fileType}`);
+
+        if (!input) {
+            console.error(`[setupUploadZones] No input element found for zone ${fileType}`);
+            return;
+        }
 
         // Click to upload
-        zone.addEventListener('click', () => input.click());
+        zone.addEventListener('click', () => {
+            console.log(`[setupUploadZones] Clicked on ${fileType}`);
+            input.click();
+        });
 
         // Drag and drop
         zone.addEventListener('dragover', (e) => {
             e.preventDefault();
             zone.classList.add('active');
+            console.log(`[setupUploadZones] Dragover on ${fileType}`);
         });
 
         zone.addEventListener('dragleave', () => {
@@ -86,16 +120,22 @@ function setupUploadZones() {
         zone.addEventListener('drop', (e) => {
             e.preventDefault();
             zone.classList.remove('active');
+            console.log(`[setupUploadZones] Dropped file(s) on ${fileType}`);
             handleFileUpload(e.dataTransfer.files[0], fileType);
         });
 
         // File input change
         input.addEventListener('change', (e) => {
+            console.log(`[setupUploadZones] File input changed for ${fileType}:`, e.target.files);
             if (e.target.files.length > 0) {
                 handleFileUpload(e.target.files[0], fileType);
             }
         });
+        
+        console.log(`[setupUploadZones] ✓ Zone ${fileType} configured`);
     });
+    
+    console.log('[setupUploadZones] All zones configured');
 }
 
 /**
@@ -104,50 +144,90 @@ function setupUploadZones() {
 async function handleFileUpload(file, fileType) {
     if (!file) return;
 
+    console.log(`[handleFileUpload] Starting upload for ${fileType}:`, file.name);
+
+    // Check if WASM is ready
+    if (!appState.explorer) {
+        showMessage('WASM module not initialized. Please refresh the page.', 'error');
+        console.error('[handleFileUpload] appState.explorer is null');
+        return;
+    }
+
     const reader = new FileReader();
 
     reader.onload = async (e) => {
         try {
             const content = e.target.result;
+            console.log(`[handleFileUpload] File read complete, size: ${content.byteLength} bytes`);
 
             // Load file based on type
             let result;
-            switch (fileType) {
-                case 'poni':
-                    // PONI is text, decode as string
-                    const text = new TextDecoder().decode(new Uint8Array(content));
-                    result = JSON.parse(appState.explorer.load_poni(text));
-                    break;
+            console.log(`[handleFileUpload] Processing ${fileType}`);
+            
+            try {
+                switch (fileType) {
+                    case 'poni':
+                        // PONI is text, decode as string
+                        console.log('[handleFileUpload] Decoding PONI as text');
+                        const text = new TextDecoder().decode(new Uint8Array(content));
+                        console.log('[handleFileUpload] Calling load_poni with', text.length, 'chars');
+                        result = JSON.parse(appState.explorer.load_poni(text));
+                        break;
 
-                case 'bright_field':
-                    result = JSON.parse(appState.explorer.load_bright_field(base64Encode(content)));
-                    break;
+                    case 'bright_field':
+                        console.log('[handleFileUpload] Encoding bright_field as base64');
+                        const bf_b64 = base64Encode(content);
+                        console.log('[handleFileUpload] Calling load_bright_field with', bf_b64.length, 'bytes (b64)');
+                        result = JSON.parse(appState.explorer.load_bright_field(bf_b64));
+                        break;
 
-                case 'mask':
-                    result = JSON.parse(appState.explorer.load_mask(base64Encode(content)));
-                    break;
+                    case 'mask':
+                        console.log('[handleFileUpload] Encoding mask as base64');
+                        const mask_b64 = base64Encode(content);
+                        console.log('[handleFileUpload] Calling load_mask with', mask_b64.length, 'bytes (b64)');
+                        result = JSON.parse(appState.explorer.load_mask(mask_b64));
+                        break;
 
-                case 'image':
-                    result = JSON.parse(appState.explorer.load_image(base64Encode(content)));
-                    break;
-            }
+                    case 'image':
+                        console.log('[handleFileUpload] Encoding image as base64');
+                        const img_b64 = base64Encode(content);
+                        console.log('[handleFileUpload] Calling load_image with', img_b64.length, 'bytes (b64)');
+                        result = JSON.parse(appState.explorer.load_image(img_b64));
+                        break;
 
-            if (result.status === 'success') {
-                appState.loadedFiles[fileType] = result;
-                showFileStatus(fileType, true);
-                showMessage(`✓ ${file.name} loaded successfully`, 'success');
-                updateStatus();
-            } else {
-                showMessage(`Error loading ${file.name}: ${result.error}`, 'error');
+                    default:
+                        throw new Error(`Unknown file type: ${fileType}`);
+                }
+
+                console.log(`[handleFileUpload] Result:`, result);
+
+                if (result && result.status === 'success') {
+                    appState.loadedFiles[fileType] = result;
+                    showFileStatus(fileType, true);
+                    showMessage(`✓ ${file.name} loaded successfully`, 'success');
+                    updateStatus();
+                    console.log(`[handleFileUpload] ${fileType} loaded successfully`);
+                } else if (result && result.error) {
+                    showMessage(`Error loading ${file.name}: ${result.error}`, 'error');
+                    console.error(`[handleFileUpload] Error from WASM: ${result.error}`);
+                } else {
+                    showMessage(`Unexpected response format for ${file.name}`, 'error');
+                    console.error(`[handleFileUpload] Unexpected result:`, result);
+                }
+            } catch (innerError) {
+                showMessage(`Error processing ${fileType}: ${innerError.message}`, 'error');
+                console.error(`[handleFileUpload] Inner error for ${fileType}:`, innerError);
+                throw innerError;
             }
         } catch (error) {
             showMessage(`Error processing file: ${error.message}`, 'error');
-            console.error('File processing error:', error);
+            console.error('[handleFileUpload] Outer error:', error);
         }
     };
 
     reader.onerror = () => {
         showMessage(`Error reading file: ${file.name}`, 'error');
+        console.error(`[handleFileUpload] FileReader error for ${file.name}:`, reader.error);
     };
 
     // Read as ArrayBuffer

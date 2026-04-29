@@ -7,6 +7,7 @@ use wasm_bindgen::prelude::*;
 use serde_json::json;
 use ndarray::{Array2, ArrayView2};
 use std::collections::HashMap;
+use base64::{engine::general_purpose, Engine as _};
 
 use crate::io::*;
 use crate::processing::*;
@@ -78,8 +79,16 @@ impl DataExplorer {
 
     /// Load pixel mask from base64-encoded .edf
     pub fn load_mask(&mut self, edf_base64: &str) -> Result<String, String> {
+        // Debug: log the input
+        let b64_len = edf_base64.len();
+        
         let bytes = base64_to_bytes(edf_base64)
-            .map_err(|e| format!("Base64 decode error: {}", e))?;
+            .map_err(|e| format!("Base64 decode error (input {} chars): {}", b64_len, e))?;
+        
+        let bytes_len = bytes.len();
+        
+        // Debug: check first bytes to verify it's a valid EDF
+        let is_valid_edf = bytes.len() > 10 && &bytes[0..1] == b"{";
         
         match load_mask_bytes(&bytes) {
             Ok(mask) => {
@@ -97,7 +106,8 @@ impl DataExplorer {
                     "percentage": pct,
                 }).to_string())
             }
-            Err(e) => Err(format!("Mask load error: {}", e)),
+            Err(e) => Err(format!("Mask load error (bytes: {}, b64_len: {}, valid_edf: {}): {}", 
+                bytes_len, b64_len, is_valid_edf, e)),
         }
     }
 
@@ -231,7 +241,7 @@ fn parse_poni_text(content: &str) -> Result<AzimuthalIntegrator, String> {
     let mut rot1 = 0.0;
     let mut rot2 = 0.0;
     let mut rot3 = 0.0;
-    let mut detector_config = HashMap::new();
+    let detector_config = HashMap::new();
     
     for line in content.lines() {
         let line = line.trim();
@@ -310,27 +320,26 @@ fn parse_poni_text(content: &str) -> Result<AzimuthalIntegrator, String> {
 }
 
 /// Load bright field from binary bytes
-fn load_bright_field_bytes(_bytes: &[u8]) -> Result<Array2<f32>, String> {
-    // In production WASM, we'd need to convert bytes to actual .npy format
-    // For now, return a placeholder
-    Err("Binary loading in WASM requires custom implementation".to_string())
+fn load_bright_field_bytes(bytes: &[u8]) -> Result<Array2<f32>, String> {
+    load_bright_field_from_bytes(bytes)
+        .map_err(|e| format!("Bright field load error: {}", e))
 }
 
 /// Load mask from binary bytes
-fn load_mask_bytes(_bytes: &[u8]) -> Result<Array2<bool>, String> {
-    // In production WASM, convert bytes to Array2<bool>
-    Err("Binary loading in WASM requires custom implementation".to_string())
+fn load_mask_bytes(bytes: &[u8]) -> Result<Array2<bool>, String> {
+    load_mask_from_bytes(bytes)
+        .map_err(|e| format!("Mask load error: {}", e))
 }
 
 /// Load TIFF from binary bytes
-fn load_tiff_bytes(_bytes: &[u8]) -> Result<Array2<u32>, String> {
-    // In production WASM, use the tiff crate to parse bytes
-    Err("Binary loading in WASM requires custom implementation".to_string())
+fn load_tiff_bytes(bytes: &[u8]) -> Result<Array2<u32>, String> {
+    load_tiff_from_bytes(bytes)
+        .map_err(|e| format!("TIFF load error: {}", e))
 }
 
 /// Decode base64 string to bytes
-fn base64_to_bytes(_base64_str: &str) -> Result<Vec<u8>, String> {
-    // Use the base64 crate to decode
-    // For now, return placeholder error
-    Err("Base64 decoding requires external crate".to_string())
+fn base64_to_bytes(base64_str: &str) -> Result<Vec<u8>, String> {
+    general_purpose::STANDARD
+        .decode(base64_str.trim())
+        .map_err(|e| format!("Base64 decode error: {}", e))
 }
