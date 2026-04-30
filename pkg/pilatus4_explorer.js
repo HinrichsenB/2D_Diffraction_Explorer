@@ -31,6 +31,52 @@ export class DataExplorer {
         }
     }
     /**
+     * Get detector image as base64-encoded raw pixel data (for visualization)
+     * Returns PNG representation for easier display
+     * @returns {string}
+     */
+    get_image_data() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.dataexplorer_get_image_data(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Compute and return LUT (Look-Up Table) geometry for debugging
+     * Returns 2θ and χ values for all detector pixels
+     * @returns {string}
+     */
+    get_lut() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.dataexplorer_get_lut(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
      * Load bright field correction from base64-encoded .npy
      * @param {string} npy_base64
      * @returns {string}

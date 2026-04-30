@@ -12,6 +12,16 @@ export class DataExplorer {
      */
     detector_info(): string;
     /**
+     * Get detector image as base64-encoded raw pixel data (for visualization)
+     * Returns PNG representation for easier display
+     */
+    get_image_data(): string;
+    /**
+     * Compute and return LUT (Look-Up Table) geometry for debugging
+     * Returns 2θ and χ values for all detector pixels
+     */
+    get_lut(): string;
+    /**
      * Load bright field correction from base64-encoded .npy
      */
     load_bright_field(npy_base64: string): string;
@@ -47,6 +57,8 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_dataexplorer_free: (a: number, b: number) => void;
     readonly dataexplorer_detector_info: (a: number) => [number, number];
+    readonly dataexplorer_get_image_data: (a: number) => [number, number, number, number];
+    readonly dataexplorer_get_lut: (a: number) => [number, number, number, number];
     readonly dataexplorer_load_bright_field: (a: number, b: number, c: number) => [number, number, number, number];
     readonly dataexplorer_load_image: (a: number, b: number, c: number) => [number, number, number, number];
     readonly dataexplorer_load_mask: (a: number, b: number, c: number) => [number, number, number, number];
@@ -56,9 +68,9 @@ export interface InitOutput {
     readonly dataexplorer_status: (a: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
-    readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

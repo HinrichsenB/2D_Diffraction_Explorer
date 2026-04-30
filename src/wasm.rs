@@ -143,18 +143,21 @@ impl DataExplorer {
         tth_max: f64,
         n_bins: usize,
     ) -> Result<String, String> {
-        // Validate all required data is loaded
+        // Validate required data is loaded
         let calibration = self.calibration.as_ref()
             .ok_or_else(|| "PONI calibration not loaded".to_string())?;
-        let bright_field = self.bright_field.as_ref()
-            .ok_or_else(|| "Bright field not loaded".to_string())?;
         let image = self.image.as_ref()
             .ok_or_else(|| "Image not loaded".to_string())?;
 
-        // Step 1: Apply flat field correction
+        // Step 1: Apply flat field correction (optional)
         let image_view: ArrayView2<u32> = image.view();
-        let corrected = apply_flatfield(&image_view, &bright_field.view())
-            .map_err(|e| format!("Flatfield error: {}", e))?;
+        let corrected = if let Some(bf) = &self.bright_field {
+            apply_flatfield(&image_view, &bf.view())
+                .map_err(|e| format!("Flatfield error: {}", e))?
+        } else {
+            // Convert image to f32 without flatfield correction
+            image_view.mapv(|x| x as f32)
+        };
 
         // Step 2: Create integration geometry from calibration
         let geom = IntegrationGeometry::from(calibration);
@@ -201,6 +204,132 @@ impl DataExplorer {
         });
 
         Ok(result_json.to_string())
+    }
+
+    /// Get detector image as base64-encoded raw pixel data (for visualization)
+    /// Returns PNG representation for easier display
+    pub fn get_image_data(&self) -> Result<String, String> {
+        let image = self.image.as_ref()
+            .ok_or_else(|| "Image not loaded".to_string())?;
+        
+        let (n_rows, n_cols) = image.dim();
+        
+        // Find min/max for normalization
+        let min_val = image.iter().copied().fold(u32::MAX, u32::min);
+        let max_val = image.iter().copied().fold(0u32, u32::max);
+        let range = (max_val - min_val).max(1);
+        
+        // Create RGBA8 image buffer (each pixel as 4 bytes: R, G, B, A)
+        let mut rgb_data = Vec::with_capacity(n_rows * n_cols * 4);
+        
+        for &pixel in image.iter() {
+            // Normalize to 0-255 and apply viridis-like colormap
+            let norm = ((pixel - min_val) as f32) / (range as f32);
+            let norm = norm.max(0.0).min(1.0);
+            
+            // Simple viridis approximation
+            let (r, g, b) = if norm < 0.25 {
+                // Dark purple to blue
+                let t = norm / 0.25;
+                (32.0 + t * 64.0, 0.0, 32.0 + t * 64.0)
+            } else if norm < 0.5 {
+                // Blue to cyan
+                let t = (norm - 0.25) / 0.25;
+                (0.0 + t * 255.0, 64.0 + t * 128.0, 96.0 + t * 128.0)
+            } else if norm < 0.75 {
+                // Cyan to green
+                let t = (norm - 0.5) / 0.25;
+                (255.0 - t * 255.0, 192.0 + t * 63.0, 0.0 + t * 0.0)
+            } else {
+                // Green to yellow
+                let t = (norm - 0.75) / 0.25;
+                (255.0, 255.0 - t * 64.0, t * 255.0)
+            };
+            
+            rgb_data.push((r as u8).saturating_add(0));
+            rgb_data.push((g as u8).saturating_add(0));
+            rgb_data.push((b as u8).saturating_add(0));
+            rgb_data.push(255u8); // Alpha
+        }
+        
+        // Return as base64
+        let b64 = general_purpose::STANDARD.encode(&rgb_data);
+        
+        Ok(json!({
+            "status": "success",
+            "width": n_cols,
+            "height": n_rows,
+            "min_val": min_val,
+            "max_val": max_val,
+            "rgba_base64": b64,
+        }).to_string())
+    }
+
+    /// Compute and return LUT (Look-Up Table) geometry for debugging
+    /// Returns 2θ and χ values for all detector pixels
+    pub fn get_lut(&self) -> Result<String, String> {
+        let calibration = self.calibration.as_ref()
+            .ok_or_else(|| "PONI calibration not loaded".to_string())?;
+        let image = self.image.as_ref()
+            .ok_or_else(|| "Image not loaded".to_string())?;
+
+        let geom = IntegrationGeometry::from(calibration);
+        let (n_rows, n_cols) = image.dim();
+        
+        // Precompute rotation matrix
+        let c1 = geom.rot1.cos();
+        let s1 = geom.rot1.sin();
+        let c2 = geom.rot2.cos();
+        let s2 = geom.rot2.sin();
+        let c3 = geom.rot3.cos();
+        let s3 = geom.rot3.sin();
+        
+        let r11 = c2 * c3;
+        let r12 = s1 * s2 * c3 - c1 * s3;
+        let r21 = c2 * s3;
+        let r22 = s1 * s2 * s3 + c1 * c3;
+        let r31 = -s2;
+        let r32 = s1 * c2;
+        
+        // Collect sample of LUT values (every Nth pixel to avoid huge output)
+        let mut lut_samples = Vec::new();
+        let step = (n_rows / 50).max(1); // Sample ~50 rows
+        
+        for i in (0..n_rows).step_by(step) {
+            for j in (0..n_cols).step_by(step) {
+                let y_pixel_m = i as f64 * geom.pixel_size_1 - geom.poni1;
+                let x_pixel_m = j as f64 * geom.pixel_size_2 - geom.poni2;
+                
+                let x_rot = r11 * x_pixel_m + r12 * y_pixel_m;
+                let y_rot = r21 * x_pixel_m + r22 * y_pixel_m;
+                let z_component = r31 * x_pixel_m + r32 * y_pixel_m;
+                let z_pos = geom.distance + z_component;
+                
+                let r_transverse = (x_rot * x_rot + y_rot * y_rot).sqrt();
+                let two_theta_rad = 2.0 * (r_transverse / z_pos).atan();
+                let two_theta_deg = two_theta_rad.to_degrees();
+                
+                let chi_rad = y_rot.atan2(x_rot);
+                let chi_deg = chi_rad.to_degrees();
+                
+                lut_samples.push(json!({
+                    "pixel_i": i,
+                    "pixel_j": j,
+                    "two_theta_deg": two_theta_deg,
+                    "chi_deg": chi_deg,
+                }));
+            }
+        }
+        
+        Ok(json!({
+            "status": "success",
+            "detector_shape": [n_rows, n_cols],
+            "poni1_m": geom.poni1,
+            "poni2_m": geom.poni2,
+            "distance_m": geom.distance,
+            "wavelength_m": geom.wavelength,
+            "lut_samples": lut_samples,
+        }).to_string())
     }
 
     /// Get detector info

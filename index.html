@@ -228,6 +228,14 @@
             position: relative;
         }
 
+        #lut-container {
+            background: #f5f5f5;
+            border-radius: 8px;
+            overflow: hidden;
+            height: 250px;
+            position: relative;
+        }
+
         .status-bar {
             display: grid;
             grid-template-columns: repeat(5, 1fr);
@@ -446,6 +454,11 @@
                 <h2>📉 1D Integration</h2>
                 <div id="graph-container">
                     <canvas id="graph"></canvas>
+                </div>
+
+                <h2>🔍 LUT Geometry (Debugging)</h2>
+                <div id="lut-container">
+                    <canvas id="lut-canvas"></canvas>
                 </div>
 
                 <div class="export-controls">

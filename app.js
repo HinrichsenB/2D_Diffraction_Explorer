@@ -339,6 +339,9 @@ function updateVisualizations(result) {
 
     // Draw 1D integration curve
     draw1DCurve(result);
+
+    // Draw LUT geometry (debugging)
+    drawLUTGeometry();
 }
 
 /**
@@ -348,16 +351,87 @@ function draw2DImage() {
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
 
-    // For now, just show a placeholder
-    // In production, would render the detector image with color mapping
-    ctx.fillStyle = '#f5f5f5';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Get image data from WASM
+    if (!appState.explorer) {
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#999';
+        ctx.font = '12px system-ui';
+        ctx.fillText('WASM not initialized', 10, 20);
+        return;
+    }
 
-    ctx.fillStyle = '#999';
-    ctx.font = '14px system-ui';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('2D Detector Image (2180 × 2073)', canvas.width / 2, canvas.height / 2);
+    try {
+        const imageDataStr = appState.explorer.get_image_data();
+        const imageData = JSON.parse(imageDataStr);
+
+        if (imageData.status !== 'success') {
+            ctx.fillStyle = '#f5f5f5';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#999';
+            ctx.font = '12px system-ui';
+            ctx.textAlign = 'center';
+            ctx.fillText('Error loading image data', canvas.width / 2, canvas.height / 2);
+            return;
+        }
+
+        const width = imageData.width;
+        const height = imageData.height;
+        const minVal = imageData.min_val;
+        const maxVal = imageData.max_val;
+
+        // Decode RGBA data from base64
+        const rgbaBase64 = imageData.rgba_base64;
+        const binaryString = atob(rgbaBase64);
+        const bytes = new Uint8ClampedArray(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        // Create ImageData and display
+        const imgData = ctx.createImageData(width, height);
+        imgData.data.set(bytes);
+
+        // Calculate display dimensions to fit in canvas
+        const aspectRatio = width / height;
+        let displayWidth = canvas.width;
+        let displayHeight = canvas.width / aspectRatio;
+
+        if (displayHeight > canvas.height) {
+            displayHeight = canvas.height;
+            displayWidth = canvas.height * aspectRatio;
+        }
+
+        const offsetX = (canvas.width - displayWidth) / 2;
+        const offsetY = (canvas.height - displayHeight) / 2;
+
+        // Draw on temporary canvas then scale to main canvas
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = width;
+        tempCanvas.height = height;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.putImageData(imgData, 0, 0);
+
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(tempCanvas, offsetX, offsetY, displayWidth, displayHeight);
+
+        // Add colorbar info
+        ctx.fillStyle = '#333';
+        ctx.font = '11px system-ui';
+        ctx.textAlign = 'left';
+        ctx.fillText(`Min: ${minVal}`, 10, canvas.height - 5);
+        ctx.textAlign = 'right';
+        ctx.fillText(`Max: ${maxVal}`, canvas.width - 10, canvas.height - 5);
+    } catch (error) {
+        console.error('[draw2DImage] Error:', error);
+        ctx.fillStyle = '#f5f5f5';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#c33';
+        ctx.font = '12px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText('Error: ' + error.message, canvas.width / 2, canvas.height / 2);
+    }
 }
 
 /**
@@ -436,19 +510,126 @@ function draw1DCurve(result) {
 }
 
 /**
+ * Draw LUT (Look-Up Table) geometry visualization
+ */
+function drawLUTGeometry() {
+    const canvas = document.getElementById('lut-canvas');
+    const ctx = canvas.getContext('2d');
+
+    if (!appState.explorer) {
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#999';
+        ctx.font = '12px system-ui';
+        ctx.fillText('WASM not initialized', 10, 20);
+        return;
+    }
+
+    try {
+        const lutStr = appState.explorer.get_lut();
+        const lut = JSON.parse(lutStr);
+
+        if (lut.status !== 'success') {
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#999';
+            ctx.font = '12px system-ui';
+            ctx.textAlign = 'center';
+            ctx.fillText('LUT Error', canvas.width / 2, canvas.height / 2);
+            return;
+        }
+
+        // Clear canvas
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Title and info
+        ctx.fillStyle = '#333';
+        ctx.font = 'bold 12px system-ui';
+        ctx.textAlign = 'left';
+        ctx.fillText('LUT Geometry Sample (Distance: ' + lut.distance_m.toFixed(3) + ' m)', 10, 20);
+
+        // Draw 2θ vs χ scatter
+        const padding = 40;
+        const width = canvas.width - padding - 10;
+        const height = canvas.height - padding - 10;
+
+        // Find min/max for axes
+        let minTTH = Infinity, maxTTH = -Infinity;
+        let minChi = Infinity, maxChi = -Infinity;
+
+        lut.lut_samples.forEach(sample => {
+            minTTH = Math.min(minTTH, sample.two_theta_deg);
+            maxTTH = Math.max(maxTTH, sample.two_theta_deg);
+            minChi = Math.min(minChi, sample.chi_deg);
+            maxChi = Math.max(maxChi, sample.chi_deg);
+        });
+
+        // Add margins
+        const tthRange = (maxTTH - minTTH) || 1;
+        const chiRange = (maxChi - minChi) || 1;
+        minTTH -= tthRange * 0.05;
+        maxTTH += tthRange * 0.05;
+        minChi -= chiRange * 0.05;
+        maxChi += chiRange * 0.05;
+
+        // Draw axes
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(padding, canvas.height - padding);
+        ctx.lineTo(canvas.width - 10, canvas.height - padding);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(padding, padding + 10);
+        ctx.lineTo(padding, canvas.height - padding);
+        ctx.stroke();
+
+        // Plot points
+        ctx.fillStyle = '#667eea';
+        ctx.globalAlpha = 0.6;
+        lut.lut_samples.forEach(sample => {
+            const x = padding + ((sample.two_theta_deg - minTTH) / (maxTTH - minTTH)) * width;
+            const y = canvas.height - padding - ((sample.chi_deg - minChi) / (maxChi - minChi)) * height;
+            ctx.fillRect(x - 2, y - 2, 4, 4);
+        });
+        ctx.globalAlpha = 1.0;
+
+        // Labels
+        ctx.fillStyle = '#333';
+        ctx.font = '10px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText('2θ (deg)', canvas.width / 2, canvas.height - 5);
+        ctx.save();
+        ctx.translate(5, canvas.height / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center';
+        ctx.fillText('χ (deg)', 0, 0);
+        ctx.restore();
+    } catch (error) {
+        console.error('[drawLUTGeometry] Error:', error);
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#c33';
+        ctx.font = '10px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText('Error: ' + error.message, canvas.width / 2, canvas.height / 2);
+    }
+}
+
+/**
  * Update overall status indicator
  */
 function updateStatus() {
-    const allLoaded = Object.entries(appState.loadedFiles).every(
-        ([type, data]) => data !== null
-    );
+    // Only PONI and Image are required
+    const minRequired = appState.loadedFiles.poni !== null && appState.loadedFiles.image !== null;
 
     // Update status items
     document.getElementById('status-poni').classList.toggle('active', appState.loadedFiles.poni !== null);
     document.getElementById('status-ff').classList.toggle('active', appState.loadedFiles.bright_field !== null);
     document.getElementById('status-mask').classList.toggle('active', appState.loadedFiles.mask !== null);
     document.getElementById('status-image').classList.toggle('active', appState.loadedFiles.image !== null);
-    document.getElementById('status-ready').classList.toggle('active', allLoaded);
+    document.getElementById('status-ready').classList.toggle('active', minRequired);
 
     // Update status values
     if (appState.loadedFiles.poni) {
@@ -463,10 +644,10 @@ function updateStatus() {
     if (appState.loadedFiles.image) {
         document.querySelector('#status-image .status-value').textContent = '✓';
     }
-    document.querySelector('#status-ready .status-value').textContent = allLoaded ? '✓' : '✗';
+    document.querySelector('#status-ready .status-value').textContent = minRequired ? '✓' : '✗';
 
-    // Enable process button if all loaded
-    document.getElementById('btn-process').disabled = !allLoaded;
+    // Enable process button if minimum required files are loaded
+    document.getElementById('btn-process').disabled = !minRequired;
 }
 
 /**
