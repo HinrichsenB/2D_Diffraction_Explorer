@@ -17,6 +17,11 @@ export class DataExplorer {
      */
     get_image_data(): string;
     /**
+     * Get raw image data with 99.5 percentile for proper visualization
+     * Returns raw float values for client-side 99.5 percentile scaling
+     */
+    get_image_raw(): string;
+    /**
      * Compute and return LUT (Look-Up Table) geometry for debugging
      * Returns 2θ and χ values for all detector pixels
      */
@@ -58,6 +63,7 @@ export interface InitOutput {
     readonly __wbg_dataexplorer_free: (a: number, b: number) => void;
     readonly dataexplorer_detector_info: (a: number) => [number, number];
     readonly dataexplorer_get_image_data: (a: number) => [number, number, number, number];
+    readonly dataexplorer_get_image_raw: (a: number) => [number, number, number, number];
     readonly dataexplorer_get_lut: (a: number) => [number, number, number, number];
     readonly dataexplorer_load_bright_field: (a: number, b: number, c: number) => [number, number, number, number];
     readonly dataexplorer_load_image: (a: number, b: number, c: number) => [number, number, number, number];

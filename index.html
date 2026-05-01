@@ -456,9 +456,9 @@
                     <canvas id="graph"></canvas>
                 </div>
 
-                <h2>🔍 LUT Geometry (Debugging)</h2>
-                <div id="lut-container">
-                    <canvas id="lut-canvas"></canvas>
+                <h2>🔍 LUT 3D Geometry</h2>
+                <div id="lut-container" style="height: 400px;">
+                    <div id="lut-3d" style="width: 100%; height: 100%;"></div>
                 </div>
 
                 <div class="export-controls">
@@ -473,6 +473,8 @@
         </div>
     </div>
 
+    <!-- Three.js for 3D LUT visualization -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script type="module" src="./app.js"></script>
 </body>
 </html>

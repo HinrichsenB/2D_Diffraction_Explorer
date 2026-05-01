@@ -315,6 +315,8 @@ impl DataExplorer {
                 lut_samples.push(json!({
                     "pixel_i": i,
                     "pixel_j": j,
+                    "pixel_x": j,
+                    "pixel_y": i,
                     "two_theta_deg": two_theta_deg,
                     "chi_deg": chi_deg,
                 }));
@@ -353,6 +355,44 @@ impl DataExplorer {
             "mask": self.mask.is_some(),
             "image": self.image.is_some(),
         }).to_string()
+    }
+
+    /// Get raw image data with 99.5 percentile for proper visualization
+    /// Returns raw float values for client-side 99.5 percentile scaling
+    pub fn get_image_raw(&self) -> Result<String, String> {
+        let image = self.image.as_ref()
+            .ok_or_else(|| "Image not loaded".to_string())?;
+        
+        let (n_rows, n_cols) = image.dim();
+        
+        // Convert to f32 and collect all values
+        let raw_data: Vec<f32> = image.iter()
+            .map(|&x| x as f32)
+            .collect();
+        
+        // Calculate 99.5 percentile
+        let mut sorted = raw_data.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let p995_idx = (sorted.len() as f32 * 0.995) as usize;
+        let p995 = sorted.get(p995_idx).copied().unwrap_or(*sorted.last().unwrap_or(&1.0));
+        
+        let min_val = sorted.first().copied().unwrap_or(0.0);
+        
+        // Encode raw data as base64
+        let mut raw_bytes = Vec::with_capacity(raw_data.len() * 4);
+        for val in &raw_data {
+            raw_bytes.extend_from_slice(&val.to_le_bytes());
+        }
+        let b64 = general_purpose::STANDARD.encode(&raw_bytes);
+        
+        Ok(json!({
+            "status": "success",
+            "width": n_cols,
+            "height": n_rows,
+            "min_val": min_val,
+            "p995_val": p995,
+            "raw_data_b64": b64,
+        }).to_string())
     }
 }
 

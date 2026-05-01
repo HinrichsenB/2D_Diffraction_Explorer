@@ -340,12 +340,12 @@ function updateVisualizations(result) {
     // Draw 1D integration curve
     draw1DCurve(result);
 
-    // Draw LUT geometry (debugging)
-    drawLUTGeometry();
+    // Draw 3D LUT geometry
+    draw3DLUTGeometry();
 }
 
 /**
- * Draw 2D detector image
+ * Draw 2D detector image with 99.5 percentile scaling
  */
 function draw2DImage() {
     const canvas = document.getElementById('canvas');
@@ -362,8 +362,16 @@ function draw2DImage() {
     }
 
     try {
-        const imageDataStr = appState.explorer.get_image_data();
-        const imageData = JSON.parse(imageDataStr);
+        // Try to get raw data first (new method), fallback to old method
+        let imageData = null;
+        try {
+            const rawDataStr = appState.explorer.get_image_raw();
+            imageData = JSON.parse(rawDataStr);
+        } catch (e) {
+            console.warn('[draw2DImage] Raw data method not available, using old method');
+            const imageDataStr = appState.explorer.get_image_data();
+            imageData = JSON.parse(imageDataStr);
+        }
 
         if (imageData.status !== 'success') {
             ctx.fillStyle = '#f5f5f5';
@@ -377,20 +385,82 @@ function draw2DImage() {
 
         const width = imageData.width;
         const height = imageData.height;
-        const minVal = imageData.min_val;
-        const maxVal = imageData.max_val;
-
-        // Decode RGBA data from base64
-        const rgbaBase64 = imageData.rgba_base64;
-        const binaryString = atob(rgbaBase64);
-        const bytes = new Uint8ClampedArray(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
+        
+        // Get raw data with 99.5 percentile
+        let rawData = null;
+        let minVal = imageData.min_val || 0;
+        let p995 = imageData.p995_val || imageData.max_val || 1;
+        
+        if (imageData.raw_data_b64) {
+            // New method: decode base64 raw data
+            const binaryString = atob(imageData.raw_data_b64);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            const view = new DataView(bytes.buffer);
+            rawData = [];
+            for (let i = 0; i < bytes.length; i += 4) {
+                rawData.push(view.getFloat32(i, true)); // true = little-endian
+            }
+        } else if (imageData.rgba_base64) {
+            // Fallback: use pre-rendered RGBA data
+            const binaryString = atob(imageData.rgba_base64);
+            const bytes = new Uint8ClampedArray(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            const imgData = ctx.createImageData(width, height);
+            imgData.data.set(bytes);
+            
+            const aspectRatio = width / height;
+            let displayWidth = canvas.width;
+            let displayHeight = canvas.width / aspectRatio;
+            if (displayHeight > canvas.height) {
+                displayHeight = canvas.height;
+                displayWidth = canvas.height * aspectRatio;
+            }
+            const offsetX = (canvas.width - displayWidth) / 2;
+            const offsetY = (canvas.height - displayHeight) / 2;
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = width;
+            tempCanvas.height = height;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.putImageData(imgData, 0, 0);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(tempCanvas, offsetX, offsetY, displayWidth, displayHeight);
+            ctx.fillStyle = '#333';
+            ctx.font = '11px system-ui';
+            ctx.textAlign = 'left';
+            ctx.fillText(`Min: ${minVal.toFixed(2)}`, 10, canvas.height - 5);
+            ctx.textAlign = 'right';
+            ctx.fillText(`Max: ${imageData.max_val?.toFixed(2) || 'N/A'}`, canvas.width - 10, canvas.height - 5);
+            return;
+        }
+        
+        if (!rawData) {
+            throw new Error('No raw data available');
         }
 
-        // Create ImageData and display
+        // Create image from raw data with 99.5 percentile scaling
         const imgData = ctx.createImageData(width, height);
-        imgData.data.set(bytes);
+        const data = imgData.data;
+
+        for (let i = 0; i < rawData.length; i++) {
+            const val = rawData[i];
+            // Clamp to [minVal, p995] and normalize to [0, 1]
+            const normalized = Math.max(0, Math.min(1, (val - minVal) / (p995 - minVal)));
+            
+            // Apply Viridis colormap
+            const color = getViridisColor(normalized);
+            
+            const pixelIdx = i * 4;
+            data[pixelIdx] = color[0];     // R
+            data[pixelIdx + 1] = color[1]; // G
+            data[pixelIdx + 2] = color[2]; // B
+            data[pixelIdx + 3] = 255;      // A
+        }
 
         // Calculate display dimensions to fit in canvas
         const aspectRatio = width / height;
@@ -416,13 +486,13 @@ function draw2DImage() {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(tempCanvas, offsetX, offsetY, displayWidth, displayHeight);
 
-        // Add colorbar info
+        // Add colorbar info with 99.5 percentile
         ctx.fillStyle = '#333';
         ctx.font = '11px system-ui';
         ctx.textAlign = 'left';
-        ctx.fillText(`Min: ${minVal}`, 10, canvas.height - 5);
+        ctx.fillText(`Min: ${minVal.toFixed(2)}`, 10, canvas.height - 5);
         ctx.textAlign = 'right';
-        ctx.fillText(`Max: ${maxVal}`, canvas.width - 10, canvas.height - 5);
+        ctx.fillText(`P99.5: ${p995.toFixed(2)}`, canvas.width - 10, canvas.height - 5);
     } catch (error) {
         console.error('[draw2DImage] Error:', error);
         ctx.fillStyle = '#f5f5f5';
@@ -432,6 +502,45 @@ function draw2DImage() {
         ctx.textAlign = 'center';
         ctx.fillText('Error: ' + error.message, canvas.width / 2, canvas.height / 2);
     }
+}
+
+/**
+ * Viridis colormap (perceptually uniform)
+ * Maps [0, 1] to RGB color
+ */
+function getViridisColor(value) {
+    // Viridis colormap lookup table
+    const viridis = [
+        [0.267004, 0.004874, 0.329415],
+        [0.282623, 0.140461, 0.469910],
+        [0.253935, 0.265254, 0.529983],
+        [0.206756, 0.371758, 0.553806],
+        [0.163625, 0.471133, 0.558390],
+        [0.127568, 0.566949, 0.550413],
+        [0.134692, 0.658636, 0.517649],
+        [0.266941, 0.748751, 0.440573],
+        [0.477504, 0.821444, 0.318195],
+        [0.741388, 0.873449, 0.149561],
+        [0.993248, 0.906157, 0.143936],
+    ];
+    
+    const idx = value * (viridis.length - 1);
+    const lowerIdx = Math.floor(idx);
+    const upperIdx = Math.ceil(idx);
+    const t = idx - lowerIdx;
+    
+    if (lowerIdx === upperIdx) {
+        const c = viridis[lowerIdx];
+        return [Math.round(c[0] * 255), Math.round(c[1] * 255), Math.round(c[2] * 255)];
+    }
+    
+    const c1 = viridis[lowerIdx];
+    const c2 = viridis[upperIdx];
+    return [
+        Math.round((c1[0] * (1 - t) + c2[0] * t) * 255),
+        Math.round((c1[1] * (1 - t) + c2[1] * t) * 255),
+        Math.round((c1[2] * (1 - t) + c2[2] * t) * 255),
+    ];
 }
 
 /**
@@ -510,18 +619,20 @@ function draw1DCurve(result) {
 }
 
 /**
- * Draw LUT (Look-Up Table) geometry visualization
+ * Draw 3D LUT geometry with Three.js
+ * Z-axis: 2θ (scattering angle)
+ * X-Y axes: Detector coordinates
  */
-function drawLUTGeometry() {
-    const canvas = document.getElementById('lut-canvas');
-    const ctx = canvas.getContext('2d');
+function draw3DLUTGeometry() {
+    const container = document.getElementById('lut-3d');
+    
+    if (!container) {
+        console.error('[draw3DLUTGeometry] Container not found');
+        return;
+    }
 
     if (!appState.explorer) {
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#999';
-        ctx.font = '12px system-ui';
-        ctx.fillText('WASM not initialized', 10, 20);
+        container.innerHTML = '<p style="color: #999; text-align: center; padding: 20px;">WASM not initialized</p>';
         return;
     }
 
@@ -530,90 +641,153 @@ function drawLUTGeometry() {
         const lut = JSON.parse(lutStr);
 
         if (lut.status !== 'success') {
-            ctx.fillStyle = 'white';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = '#999';
-            ctx.font = '12px system-ui';
-            ctx.textAlign = 'center';
-            ctx.fillText('LUT Error', canvas.width / 2, canvas.height / 2);
+            container.innerHTML = '<p style="color: #999; text-align: center; padding: 20px;">LUT Error</p>';
             return;
         }
 
-        // Clear canvas
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Clear previous scene
+        container.innerHTML = '';
 
-        // Title and info
-        ctx.fillStyle = '#333';
-        ctx.font = 'bold 12px system-ui';
-        ctx.textAlign = 'left';
-        ctx.fillText('LUT Geometry Sample (Distance: ' + lut.distance_m.toFixed(3) + ' m)', 10, 20);
+        // Set up Three.js scene
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xffffff);
 
-        // Draw 2θ vs χ scatter
-        const padding = 40;
-        const width = canvas.width - padding - 10;
-        const height = canvas.height - padding - 10;
+        // Camera and renderer
+        const width = container.clientWidth || 800;
+        const height = container.clientHeight || 400;
+        const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 10000);
+        camera.position.set(500, 500, 500);
+        camera.lookAt(0, 0, 0);
 
-        // Find min/max for axes
-        let minTTH = Infinity, maxTTH = -Infinity;
-        let minChi = Infinity, maxChi = -Infinity;
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(width, height);
+        renderer.setPixelRatio(window.devicePixelRatio || 1);
+        container.appendChild(renderer.domElement);
+
+        // Add lighting
+        const light1 = new THREE.PointLight(0xffffff, 1, 10000);
+        light1.position.set(500, 500, 500);
+        scene.add(light1);
+
+        const light2 = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(light2);
+
+        // Create points from LUT data
+        const points = [];
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        let minZ = Infinity, maxZ = -Infinity;
 
         lut.lut_samples.forEach(sample => {
-            minTTH = Math.min(minTTH, sample.two_theta_deg);
-            maxTTH = Math.max(maxTTH, sample.two_theta_deg);
-            minChi = Math.min(minChi, sample.chi_deg);
-            maxChi = Math.max(maxChi, sample.chi_deg);
+            // Use pixel coordinates as X, Y and 2θ as Z
+            points.push([
+                sample.pixel_x,
+                sample.pixel_y,
+                sample.two_theta_deg * 10 // Scale for visibility
+            ]);
+            minX = Math.min(minX, sample.pixel_x);
+            maxX = Math.max(maxX, sample.pixel_x);
+            minY = Math.min(minY, sample.pixel_y);
+            maxY = Math.max(maxY, sample.pixel_y);
+            minZ = Math.min(minZ, sample.two_theta_deg * 10);
+            maxZ = Math.max(maxZ, sample.two_theta_deg * 10);
         });
 
-        // Add margins
-        const tthRange = (maxTTH - minTTH) || 1;
-        const chiRange = (maxChi - minChi) || 1;
-        minTTH -= tthRange * 0.05;
-        maxTTH += tthRange * 0.05;
-        minChi -= chiRange * 0.05;
-        maxChi += chiRange * 0.05;
+        // Create geometry for points
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(points.length * 3);
+        const colors = new Float32Array(points.length * 3);
 
-        // Draw axes
-        ctx.strokeStyle = '#333';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(padding, canvas.height - padding);
-        ctx.lineTo(canvas.width - 10, canvas.height - padding);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(padding, padding + 10);
-        ctx.lineTo(padding, canvas.height - padding);
-        ctx.stroke();
+        points.forEach((point, i) => {
+            positions[i * 3] = point[0];
+            positions[i * 3 + 1] = point[1];
+            positions[i * 3 + 2] = point[2];
 
-        // Plot points
-        ctx.fillStyle = '#667eea';
-        ctx.globalAlpha = 0.6;
-        lut.lut_samples.forEach(sample => {
-            const x = padding + ((sample.two_theta_deg - minTTH) / (maxTTH - minTTH)) * width;
-            const y = canvas.height - padding - ((sample.chi_deg - minChi) / (maxChi - minChi)) * height;
-            ctx.fillRect(x - 2, y - 2, 4, 4);
+            // Color by 2θ value (from 0=blue to 1=red)
+            const zNorm = (point[2] - minZ) / (maxZ - minZ || 1);
+            const color = getViridisColor(zNorm);
+            colors[i * 3] = color[0] / 255;
+            colors[i * 3 + 1] = color[1] / 255;
+            colors[i * 3 + 2] = color[2] / 255;
         });
-        ctx.globalAlpha = 1.0;
 
-        // Labels
-        ctx.fillStyle = '#333';
-        ctx.font = '10px system-ui';
-        ctx.textAlign = 'center';
-        ctx.fillText('2θ (deg)', canvas.width / 2, canvas.height - 5);
-        ctx.save();
-        ctx.translate(5, canvas.height / 2);
-        ctx.rotate(-Math.PI / 2);
-        ctx.textAlign = 'center';
-        ctx.fillText('χ (deg)', 0, 0);
-        ctx.restore();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const material = new THREE.PointsMaterial({
+            size: 8,
+            vertexColors: true,
+            sizeAttenuation: true
+        });
+
+        const pointsMesh = new THREE.Points(geometry, material);
+        scene.add(pointsMesh);
+
+        // Add axes helper
+        const axesHelper = new THREE.AxesHelper(100);
+        scene.add(axesHelper);
+
+        // Add grid
+        const gridHelper = new THREE.GridHelper(1000, 10, 0xcccccc, 0xeeeeee);
+        gridHelper.position.z = minZ - 10;
+        scene.add(gridHelper);
+
+        // Add axis labels
+        const canvas = renderer.domElement.parentElement;
+        const info = document.createElement('div');
+        info.style.cssText = 'position: absolute; top: 10px; left: 10px; color: #333; font-size: 11px; background: rgba(255,255,255,0.8); padding: 10px; border-radius: 4px;';
+        info.innerHTML = `
+            <div><strong>LUT 3D Geometry</strong></div>
+            <div>X: Detector X (0–${Math.round(maxX)} px)</div>
+            <div>Y: Detector Y (0–${Math.round(maxY)} px)</div>
+            <div>Z: 2θ (${(minZ/10).toFixed(1)}–${(maxZ/10).toFixed(1)}°)</div>
+            <div>Distance: ${lut.distance_m.toFixed(3)} m</div>
+            <div style="margin-top: 5px; font-size: 10px; color: #666;">Drag to rotate, scroll to zoom</div>
+        `;
+        container.appendChild(info);
+
+        // Add mouse controls
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        const rotation = { x: 0, y: 0 };
+
+        renderer.domElement.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+
+        renderer.domElement.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                const deltaX = e.clientX - previousMousePosition.x;
+                const deltaY = e.clientY - previousMousePosition.y;
+                rotation.y += deltaX * 0.005;
+                rotation.x += deltaY * 0.005;
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+                
+                pointsMesh.rotation.y = rotation.y;
+                pointsMesh.rotation.x = rotation.x;
+            }
+        });
+
+        renderer.domElement.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        renderer.domElement.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            camera.position.multiplyScalar(1 + e.deltaY * 0.001);
+        });
+
+        // Render loop
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+
+        animate();
     } catch (error) {
-        console.error('[drawLUTGeometry] Error:', error);
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#c33';
-        ctx.font = '10px system-ui';
-        ctx.textAlign = 'center';
-        ctx.fillText('Error: ' + error.message, canvas.width / 2, canvas.height / 2);
+        console.error('[draw3DLUTGeometry] Error:', error);
+        container.innerHTML = `<p style="color: #c33; text-align: center; padding: 20px;">Error: ${error.message}</p>`;
     }
 }
 
@@ -736,3 +910,18 @@ if (document.readyState === 'loading') {
 } else {
     init();
 }
+
+// Handle window resize for responsive canvas
+window.addEventListener('resize', () => {
+    const canvas = document.getElementById('canvas');
+    const graph = document.getElementById('graph');
+    
+    if (appState.lastResult) {
+        // Redraw with new dimensions
+        setTimeout(() => {
+            draw2DImage();
+            draw1DCurve(appState.lastResult);
+            draw3DLUTGeometry();
+        }, 100);
+    }
+});

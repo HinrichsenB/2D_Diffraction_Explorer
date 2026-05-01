@@ -1,0 +1,14 @@
+/Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/target/release/deps/serde-551789e42decda5d.d: /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/target/release/build/serde-08f947da282e313a/out/private.rs
+
+/Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/target/release/deps/libserde-551789e42decda5d.rlib: /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/target/release/build/serde-08f947da282e313a/out/private.rs
+
+/Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/target/release/deps/libserde-551789e42decda5d.rmeta: /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/target/release/build/serde-08f947da282e313a/out/private.rs
+
+/Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/Users/openclaw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/target/release/build/serde-08f947da282e313a/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/openclaw/.openclaw/workspace/projects/pilatus4_explorer/target/release/build/serde-08f947da282e313a/out

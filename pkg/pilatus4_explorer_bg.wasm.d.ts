@@ -4,6 +4,7 @@ export const memory: WebAssembly.Memory;
 export const __wbg_dataexplorer_free: (a: number, b: number) => void;
 export const dataexplorer_detector_info: (a: number) => [number, number];
 export const dataexplorer_get_image_data: (a: number) => [number, number, number, number];
+export const dataexplorer_get_image_raw: (a: number) => [number, number, number, number];
 export const dataexplorer_get_lut: (a: number) => [number, number, number, number];
 export const dataexplorer_load_bright_field: (a: number, b: number, c: number) => [number, number, number, number];
 export const dataexplorer_load_image: (a: number, b: number, c: number) => [number, number, number, number];
